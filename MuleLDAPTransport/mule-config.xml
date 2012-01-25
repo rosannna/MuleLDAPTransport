@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:script="http://www.mulesoft.org/schema/mule/scripting" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:jms="http://www.mulesoft.org/schema/mule/jms" xmlns:stdio="http://www.mulesoft.org/schema/mule/stdio"
+	xmlns:spring="http://www.springframework.org/schema/beans"
+	xmlns:vm="http://www.mulesoft.org/schema/mule/vm"
+	xmlns:ldapx="http://www.mulesoft.org/schema/mule/ldapx"
+	xsi:schemaLocation="
+      http://www.mulesoft.org/schema/mule/scripting http://www.mulesoft.org/schema/mule/scripting/3.1/mule-scripting.xsd
+      http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/3.1/mule.xsd
+      http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/3.1/mule-jms.xsd
+      http://www.mulesoft.org/schema/mule/stdio http://www.mulesoft.org/schema/mule/stdio/3.1/mule-stdio.xsd
+      http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+      http://www.mulesoft.org/schema/mule/vm http://www.mulesource.org/schema/mule/vm/3.1/mule-vm.xsd
+      http://www.mulesoft.org/schema/mule/ldapx http://www.mulesoft.org/schema/mule/ldapx/3.1/mule-ldapx.xsd">
+
+	<stdio:connector name="stdioConnector" outputMessage=":" promptMessage=":" />
+
+	<ldapx:connector
+		name="ldapxConnector"
+		ldapHost="10.10.100.166"
+		ldapPort="389"
+		loginDN="CN=Administrator,CN=Users,DC=greytower,DC=local"
+		password="admin"
+		searchBase="CN=Users,DC=greytower,DC=local" searchScope="1" />
+
+	<flow name="test_input">
+		<stdio:inbound-endpoint system="IN" exchange-pattern="one-way" connector-ref="stdioConnector" />
+		<choice>
+			<when expression="add:*" evaluator="regex">
+				<expression-transformer expression="payload.replace('add:', '')" evaluator="groovy" />
+				<message-properties-transformer>
+					<add-message-property key="ldap_objectClass" value="#[groovy:['user', 'person'].toArray(new String[1])]" />
+					<add-message-property key="ldap_cn" value="#[payload]" />
+					<add-message-property key="ldap_sn" value="#[payload]" />
+					<add-message-property key="ldap_name" value="#[payload]" />
+					<add-message-property key="ldap_userpassword" value="1qwEr4t7" />
+					<add-message-property key="ldap_password" value="1qwEr4t7" />
+					<add-message-property key="ldap_sAMAccountName" value="#[payload]" />
+					<add-message-property key="ldap_distinguishedName" value="#[string:CN=#[payload],CN=Users,DC=greytower,DC=local]" />
+				</message-properties-transformer>
+				<expression-transformer expression="ldap_distinguishedName" evaluator="header" />
+				<ldapx:message-to-ldapentry-transformer />
+				<ldapx:ldapentry-to-addrequest-transformer />
+				<ldapx:outbound-endpoint exchange-pattern="one-way" connector-ref="ldapxConnector" address="ldapx://out" />
+			</when>
+			<when expression="delete:*" evaluator="regex">
+				<expression-transformer expression="payload.replace('delete:', '')" evaluator="groovy" />
+				<expression-transformer expression="CN=#[payload],CN=Users,DC=greytower,DC=local" evaluator="string" />
+				<ldapx:string-to-deleterequest-transformer />
+				<ldapx:outbound-endpoint exchange-pattern="one-way" connector-ref="ldapxConnector" address="ldapx://out" />
+			</when>
+			<when expression="search:*" evaluator="regex">
+				<expression-transformer expression="payload.replace('search:', '')" evaluator="groovy" />
+				<ldapx:string-to-searchrequest-transformer ldapConnector-ref="ldapxConnector" />
+				<ldapx:outbound-endpoint exchange-pattern="one-way" connector-ref="ldapxConnector" address="ldapx://out" />
+			</when>
+			<when expression="modify:*" evaluator="regex">
+				<expression-transformer expression="payload.replace('modify:', '')" evaluator="groovy" />
+				<message-properties-transformer>
+					<add-message-property key="ldap_objectClass" value="#[groovy:['user', 'person'].toArray(new String[1])]" />
+					<add-message-property key="ldap_cn" value="#[payload]" />
+					<add-message-property key="ldap_sn" value="#[payload]" />
+					<add-message-property key="ldap_name" value="#[payload]" />
+					<add-message-property key="ldap_userpassword" value="Jeej3chi" />
+					<add-message-property key="ldap_sAMAccountName" value="#[payload]" />
+					<add-message-property key="ldap_distinguishedName" value="#[string:CN=#[payload],CN=Users,DC=greytower,DC=local]" />
+				</message-properties-transformer>
+				<expression-transformer expression="ldap_distinguishedName" evaluator="header" />
+				<ldapx:message-to-ldapentry-transformer />
+				<ldapx:ldapentry-to-modifyrequest-transformer ldapConnector-ref="ldapxConnector" />
+				<ldapx:outbound-endpoint exchange-pattern="one-way" connector-ref="ldapxConnector" address="ldapx://out" />
+			</when>
+			<otherwise>
+				<expression-transformer expression="Unknown command. Try add, delete or search" evaluator="string" />
+				<stdio:outbound-endpoint system="OUT" exchange-pattern="one-way" connector-ref="stdioConnector" />
+			</otherwise>
+		</choice>
+	</flow>
+
+	<flow name="test_output">
+		<ldapx:inbound-endpoint exchange-pattern="one-way" connector-ref="ldapxConnector" address="ldapx://in" />
+		<choice>
+			<when expression="com.novell.ldap.LDAPResponse" evaluator="payload-type">
+				<expression-transformer expression="[Response: [Matched DN: #[jxpath:/matchedDN]], [Error code: #[jxpath:/resultCode]], [Error message: #[jxpath:/errorMessage]]]" evaluator="string" />
+				<stdio:outbound-endpoint system="OUT" exchange-pattern="one-way" connector-ref="stdioConnector" />
+			</when>
+			<when expression="com.novell.ldap.LDAPSearchResult" evaluator="payload-type">
+				<ldapx:searchresult-to-ldapentry-transformer />
+				<script:transformer>
+					<script:script engine="groovy">
+						def getAttributeString(attrs, key) {
+							return attrs.getAttribute("name").getStringValue()
+						}
+						attrs = payload.getAttributeSet()
+						return [name: getAttributeString(attrs, "name"), key2: getAttributeString(attrs, "name")]
+					</script:script>
+				</script:transformer>
+				<!-- <ldapx:ldapentry-to-string-transformer /> -->
+				<expression-transformer expression="Name = #[map-payload:name], #[map-payload:key2]" evaluator="string" />
+				<stdio:outbound-endpoint system="OUT" exchange-pattern="one-way" connector-ref="stdioConnector" />
+			</when>
+			<when expression="org.mule.transport.NullPayload" evaluator="payload-type">
+				<expression-transformer expression="Null message received." evaluator="string" />
+				<!-- Do not do anything -->
+			</when>
+			<otherwise>
+				<expression-transformer expression="Unknown message received. Class #[function:payloadClass]" evaluator="string" />
+				<stdio:outbound-endpoint system="OUT" exchange-pattern="one-way" connector-ref="stdioConnector" />
+			</otherwise>
+		</choice>
+	</flow>
+
+</mule>
